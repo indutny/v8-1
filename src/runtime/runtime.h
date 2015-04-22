@@ -157,6 +157,7 @@ namespace internal {
   F(GetBreakLocations, 2, 1)                   \
   F(SetFunctionBreakPoint, 3, 1)               \
   F(SetScriptBreakPoint, 4, 1)                 \
+  F(CollectSharedFunctionInfoInScript, 1, 1)   \
   F(ClearBreakPoint, 1, 1)                     \
   F(ChangeBreakOnException, 2, 1)              \
   F(IsBreakOnException, 1, 1)                  \

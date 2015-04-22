@@ -469,13 +469,23 @@ ScriptBreakPoint.prototype.clear = function () {
 // Function called from runtime when a new script is compiled to set any script
 // break points set in this script.
 function UpdateScriptBreakPoints(script) {
+  var list = [];
   for (var i = 0; i < script_break_points.length; i++) {
     var break_point = script_break_points[i];
     if ((break_point.type() == Debug.ScriptBreakPointType.ScriptName ||
          break_point.type() == Debug.ScriptBreakPointType.ScriptRegExp) &&
         break_point.matchesScript(script)) {
-      break_point.set(script);
+      list.push(break_point);
     }
+  }
+
+  // Cache the shared infos in script to avoid iterating through heap twice
+  if (list.length > 1) {
+    %CollectSharedFunctionInfoInScript(script);
+  }
+
+  for (var i = 0; i < list.length; i++) {
+    list[i].set(script);
   }
 }
 

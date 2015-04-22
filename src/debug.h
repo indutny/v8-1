@@ -501,6 +501,8 @@ class Debug {
   // This function is used in FunctionNameUsing* tests.
   Handle<Object> FindSharedFunctionInfoInScript(Handle<Script> script,
                                                 int position);
+  bool CollectSharedFunctionInfoInScript(Handle<Script> script);
+  void ClearSharedFunctionInfoInScript();
 
   // Returns true if the current stub call is patched to call the debugger.
   static bool IsDebugBreak(Address addr);
@@ -679,6 +681,7 @@ class Debug {
 
   ScriptCache* script_cache_;  // Cache of all scripts in the heap.
   DebugInfoListNode* debug_info_list_;  // List of active debug info objects.
+  List<Handle<SharedFunctionInfo> > shared_info_list_;
 
   // Storage location for jump when exiting debug break calls.
   // Note that this address is not GC safe.  It should be computed immediately

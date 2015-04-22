@@ -749,6 +749,7 @@ bool Debug::Load() {
 void Debug::Unload() {
   ClearAllBreakPoints();
   ClearStepping();
+  ClearSharedFunctionInfoInScript();
 
   // Return debugger is not loaded.
   if (!is_loaded()) return;
@@ -2000,6 +2001,44 @@ void Debug::PrepareForBreakPoints() {
 }
 
 
+static int MatchSharedFunctionInfo(Handle<SharedFunctionInfo> shared,
+                                    int position,
+                                    Handle<SharedFunctionInfo> target,
+                                    int target_start_position) {
+  // If the SharedFunctionInfo found has the requested script data and
+  // contains the source position it is a candidate.
+  int start_position = shared->function_token_position();
+  if (start_position == RelocInfo::kNoPosition) {
+    start_position = shared->start_position();
+  }
+  if (start_position <= position &&
+      position <= shared->end_position()) {
+    // If there is no candidate or this function is within the current
+    // candidate this is the new candidate.
+    if (target.is_null()) {
+      return start_position;
+    } else {
+      if (target_start_position == start_position &&
+          shared->end_position() == target->end_position()) {
+        // If a top-level function contains only one function
+        // declaration the source for the top-level and the function
+        // is the same. In that case prefer the non top-level function.
+        if (!shared->is_toplevel()) {
+          return start_position;
+        }
+      } else if (target_start_position <= start_position &&
+                 shared->end_position() <= target->end_position()) {
+        // This containment check includes equality as a function
+        // inside a top-level function can share either start or end
+        // position with the top-level function.
+        return start_position;
+      }
+    }
+  }
+  return RelocInfo::kNoPosition;
+}
+
+
 Handle<Object> Debug::FindSharedFunctionInfoInScript(Handle<Script> script,
                                                      int position) {
   // Iterate the heap looking for SharedFunctionInfo generated from the
@@ -2019,12 +2058,35 @@ Handle<Object> Debug::FindSharedFunctionInfoInScript(Handle<Script> script,
   Handle<JSFunction> target_function;
   Handle<SharedFunctionInfo> target;
   Heap* heap = isolate_->heap();
+
+  if (!shared_info_list_.is_empty()) {
+    for (Handle<SharedFunctionInfo>* it = shared_info_list_.begin();
+         it != shared_info_list_.end();
+         it++) {
+      Handle<SharedFunctionInfo> shared = *it;
+      DCHECK(shared->script() == *script);
+
+      int start_position = MatchSharedFunctionInfo(shared,
+                                                   position,
+                                                   target,
+                                                   target_start_position);
+      if (start_position == RelocInfo::kNoPosition) continue;
+
+      target_start_position = start_position;
+      target = shared;
+    }
+
+    if (target.is_null()) return isolate_->factory()->undefined_value();
+    return target;
+  }
+
   while (!done) {
     { // Extra scope for iterator.
       // If lazy compilation is off, we won't have duplicate shared function
       // infos that need to be filtered.
       HeapIterator iterator(heap, FLAG_lazy ? HeapIterator::kNoFiltering
                                             : HeapIterator::kFilterUnreachable);
+
       for (HeapObject* obj = iterator.next();
            obj != NULL; obj = iterator.next()) {
         bool found_next_candidate = false;
@@ -2043,44 +2105,17 @@ Handle<Object> Debug::FindSharedFunctionInfoInScript(Handle<Script> script,
               shared->allows_lazy_compilation_without_context();
         }
         if (!found_next_candidate) continue;
-        if (shared->script() == *script) {
-          // If the SharedFunctionInfo found has the requested script data and
-          // contains the source position it is a candidate.
-          int start_position = shared->function_token_position();
-          if (start_position == RelocInfo::kNoPosition) {
-            start_position = shared->start_position();
-          }
-          if (start_position <= position &&
-              position <= shared->end_position()) {
-            // If there is no candidate or this function is within the current
-            // candidate this is the new candidate.
-            if (target.is_null()) {
-              target_start_position = start_position;
-              target_function = function;
-              target = shared;
-            } else {
-              if (target_start_position == start_position &&
-                  shared->end_position() == target->end_position()) {
-                // If a top-level function contains only one function
-                // declaration the source for the top-level and the function
-                // is the same. In that case prefer the non top-level function.
-                if (!shared->is_toplevel()) {
-                  target_start_position = start_position;
-                  target_function = function;
-                  target = shared;
-                }
-              } else if (target_start_position <= start_position &&
-                         shared->end_position() <= target->end_position()) {
-                // This containment check includes equality as a function
-                // inside a top-level function can share either start or end
-                // position with the top-level function.
-                target_start_position = start_position;
-                target_function = function;
-                target = shared;
-              }
-            }
-          }
-        }
+        if (shared->script() != *script) continue;
+
+        int start_position = MatchSharedFunctionInfo(shared,
+                                                     position,
+                                                     target,
+                                                     target_start_position);
+        if (start_position == RelocInfo::kNoPosition) continue;
+
+        target_start_position = start_position;
+        target_function = function;
+        target = shared;
       }  // End for loop.
     }  // End no-allocation scope.
 
@@ -2120,6 +2155,82 @@ Handle<Object> Debug::FindSharedFunctionInfoInScript(Handle<Script> script,
   }
 
   return target;
+}
+
+
+bool Debug::CollectSharedFunctionInfoInScript(Handle<Script> script) {
+  bool done = false;
+  // The current candidate for the source position:
+  Handle<JSFunction> target_function;
+  Handle<SharedFunctionInfo> target;
+  Heap* heap = isolate_->heap();
+  GlobalHandles* global_handles = isolate_->global_handles();
+  while (!done) {
+    DCHECK(shared_info_list_.is_empty());
+    done = true;
+
+    { // Extra scope for iterator.
+      // If lazy compilation is off, we won't have duplicate shared function
+      // infos that need to be filtered.
+      HeapIterator iterator(heap, FLAG_lazy ? HeapIterator::kNoFiltering
+                                            : HeapIterator::kFilterUnreachable);
+      for (HeapObject* obj = iterator.next();
+           obj != NULL; obj = iterator.next()) {
+        bool found_next_candidate = false;
+        Handle<JSFunction> function;
+        Handle<SharedFunctionInfo> shared;
+        if (obj->IsJSFunction()) {
+          function = Handle<JSFunction>(JSFunction::cast(obj));
+          shared = Handle<SharedFunctionInfo>(function->shared());
+          DCHECK(shared->allows_lazy_compilation() || shared->is_compiled());
+          found_next_candidate = true;
+        } else if (obj->IsSharedFunctionInfo()) {
+          shared = Handle<SharedFunctionInfo>(SharedFunctionInfo::cast(obj));
+          // Skip functions that we cannot compile lazily without a context,
+          // which is not available here, because there is no closure.
+          found_next_candidate = shared->is_compiled() ||
+              shared->allows_lazy_compilation_without_context();
+        }
+        if (!found_next_candidate) continue;
+        if (shared->script() != *script) continue;
+
+        if (!shared->is_compiled()) {
+          target = shared;
+          target_function = function;
+          done = false;
+          break;
+        }
+
+        shared_info_list_.Add(global_handles->Create(*shared));
+      }  // End for loop.
+    }  // End no-allocation scope.
+
+    if (done) continue;
+
+    // Cleanup the list, next iteration will re-add all shared infos
+    ClearSharedFunctionInfoInScript();
+
+    // If the candidate is not compiled, compile it to reveal any inner
+    // functions which might contain the requested source position. This
+    // will compile all inner functions that cannot be compiled without a
+    // context, because Compiler::BuildFunctionInfo checks whether the
+    // debugger is active.
+    MaybeHandle<Code> maybe_result = target_function.is_null()
+        ? Compiler::GetUnoptimizedCode(target)
+        : Compiler::GetUnoptimizedCode(target_function);
+    if (maybe_result.is_null()) return false;
+  }  // End while loop.
+
+  return true;
+}
+
+
+void Debug::ClearSharedFunctionInfoInScript() {
+  while (!shared_info_list_.is_empty()) {
+    Handle<SharedFunctionInfo> shared = shared_info_list_.RemoveLast();
+    Object** location = reinterpret_cast<Object**>(shared.location());
+    GlobalHandles::Destroy(location);
+  }
 }
 
 
@@ -2667,10 +2778,12 @@ void Debug::OnAfterCompile(Handle<Script> script) {
 
   // Call UpdateScriptBreakPoints expect no exceptions.
   Handle<Object> argv[] = { wrapper };
+  ClearSharedFunctionInfoInScript();
   if (Execution::TryCall(Handle<JSFunction>::cast(update_script_break_points),
                          isolate_->js_builtins_object(),
                          arraysize(argv),
                          argv).is_null()) {
+    ClearSharedFunctionInfoInScript();
     return;
   }
 

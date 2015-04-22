@@ -2008,6 +2008,23 @@ RUNTIME_FUNCTION(Runtime_SetScriptBreakPoint) {
 }
 
 
+// Collect all shared infos for a script
+// args[0]: script to set break point in
+RUNTIME_FUNCTION(Runtime_CollectSharedFunctionInfoInScript) {
+  HandleScope scope(isolate);
+  DCHECK(args.length() == 1);
+  CONVERT_ARG_HANDLE_CHECKED(JSValue, wrapper, 0);
+
+  // Get the script from the script wrapper.
+  RUNTIME_ASSERT(wrapper->value()->IsScript());
+  Handle<Script> script(Script::cast(wrapper->value()));
+
+  isolate->debug()->CollectSharedFunctionInfoInScript(script);
+
+  return isolate->heap()->undefined_value();
+}
+
+
 // Clear a break point
 // args[0]: number: break point object
 RUNTIME_FUNCTION(Runtime_ClearBreakPoint) {
