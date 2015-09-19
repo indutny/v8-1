@@ -46,6 +46,14 @@ Reduction BinaryOperatorReducer::ReduceFloat64Mul(Node* node) {
     return NoChange();
   }
 
+  Type::RangeType* range = NodeProperties::GetType(node)->GetRange();
+
+  // JavaScript has 52 bit precision in multiplication
+  if (range == nullptr || range->Min() < 0.0 ||
+      range->Max() > 0xFFFFFFFFFFFFFULL) {
+    return NoChange();
+  }
+
   // Verify that the uses cast result to Int32
   for (Node* use : node->uses()) {
     // XXX: How to handle this properly?
@@ -63,6 +71,11 @@ Reduction BinaryOperatorReducer::ReduceFloat64Mul(Node* node) {
     int64_t value = static_cast<int64_t>(m.right().Value());
     if (value != static_cast<int64_t>(m.right().Value())) return NoChange();
     if (!base::bits::IsPowerOfTwo64(value)) return NoChange();
+
+    // The result should fit into 32bit word
+    if ((static_cast<int64_t>(range->Max()) / value) > 0xFFFFFFFULL) {
+      return NoChange();
+    }
 
     // Check that uses of division are cast to Int32
     for (Node* subuse : use->uses()) {
