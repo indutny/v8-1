@@ -29,10 +29,12 @@ class BinaryOperatorReducer final : public AdvancedReducer {
   Reduction Reduce(Node* node) final;
 
  private:
-  Reduction ReduceFloat64Mul(Node* node);
+  Reduction ReduceFloat52Mul(Node* node);
+  Reduction ReduceFloat52Div(Node* node);
+
+  Reduction ReduceTruncateFloat64ToInt32(Node* node);
 
   Reduction Change(Node* node, Operator const* op, Node* a);
-  Reduction Change(Node* node, Operator const* op, Node* a, Node* b);
 
   Graph* graph() const { return graph_; }
   CommonOperatorBuilder* common() const { return common_; }

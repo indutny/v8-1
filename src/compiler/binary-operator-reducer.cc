@@ -29,8 +29,8 @@ BinaryOperatorReducer::BinaryOperatorReducer(Editor* editor, Graph* graph,
 
 Reduction BinaryOperatorReducer::Reduce(Node* node) {
   switch (node->opcode()) {
-    case IrOpcode::kFloat64Mul:
-      return ReduceFloat64Mul(node);
+    case IrOpcode::kTruncateFloat64ToInt32:
+      return ReduceTruncateFloat64ToInt32(node);
     default:
       break;
   }
@@ -38,11 +38,14 @@ Reduction BinaryOperatorReducer::Reduce(Node* node) {
 }
 
 
-Reduction BinaryOperatorReducer::ReduceFloat64Mul(Node* node) {
-  if (node->InputAt(0)->opcode() != IrOpcode::kChangeInt32ToFloat64) {
+Reduction BinaryOperatorReducer::ReduceFloat52Mul(Node* node) {
+  if (!machine()->Is64() || node->opcode() != IrOpcode::kFloat64Mul) {
     return NoChange();
   }
-  if (node->InputAt(1)->opcode() != IrOpcode::kChangeInt32ToFloat64) {
+
+  // TODO(indutny): Observe ranges and cast things to int
+  if (node->InputAt(0)->opcode() != IrOpcode::kChangeInt32ToFloat64 ||
+      node->InputAt(1)->opcode() != IrOpcode::kChangeInt32ToFloat64) {
     return NoChange();
   }
 
@@ -54,69 +57,62 @@ Reduction BinaryOperatorReducer::ReduceFloat64Mul(Node* node) {
     return NoChange();
   }
 
-  // Verify that the uses cast result to Int32
-  for (Node* use : node->uses()) {
-    // XXX: How to handle this properly?
-    if (use->opcode() == IrOpcode::kStateValues) continue;
+  Node* out = graph()->NewNode(machine()->Int64Mul(),
+      node->InputAt(0)->InputAt(0), node->InputAt(1)->InputAt(0));
+  Revisit(out);
+  return Replace(out);
+}
 
-    if (use->opcode() == IrOpcode::kTruncateFloat64ToInt32) continue;
-    if (use->opcode() != IrOpcode::kFloat64Div) return NoChange();
 
-    // Verify division
-    //
-    // The RHS value should be positive integer
-    Float64BinopMatcher m(use);
-    if (!m.right().HasValue() || m.right().Value() <= 0) return NoChange();
-
-    int64_t value = static_cast<int64_t>(m.right().Value());
-    if (value != static_cast<int64_t>(m.right().Value())) return NoChange();
-    if (!base::bits::IsPowerOfTwo64(value)) return NoChange();
-
-    // The result should fit into 32bit word
-    if ((static_cast<int64_t>(range->Max()) / value) > 0xFFFFFFFULL) {
-      return NoChange();
-    }
-
-    // Check that uses of division are cast to Int32
-    for (Node* subuse : use->uses()) {
-      // XXX: How to handle this properly?
-      if (subuse->opcode() == IrOpcode::kStateValues) continue;
-
-      if (subuse->opcode() != IrOpcode::kTruncateFloat64ToInt32) {
-        return NoChange();
-      }
-    }
+Reduction BinaryOperatorReducer::ReduceFloat52Div(Node* node) {
+  if (!machine()->Is64() || node->opcode() != IrOpcode::kFloat64Div) {
+    return NoChange();
   }
 
-  // The mul+div can be optimized
-  for (Node* use : node->uses()) {
-    // XXX: How to handle this properly?
-    if (use->opcode() == IrOpcode::kStateValues) continue;
+  Float64BinopMatcher m(node);
 
-    if (use->opcode() == IrOpcode::kTruncateFloat64ToInt32) {
-      use->set_op(machine()->TruncateInt64ToInt32());
-      Revisit(use);
-      continue;
-    }
+  // Right value should be positive...
+  if (!m.right().HasValue() || m.right().Value() <= 0) return NoChange();
 
-    Float64BinopMatcher m(use);
-    int64_t shift = WhichPowerOf2_64(static_cast<int64_t>(m.right().Value()));
+  // ...integer...
+  int64_t value = static_cast<int64_t>(m.right().Value());
+  if (value != static_cast<int64_t>(m.right().Value())) return NoChange();
 
-    use->set_op(machine()->Word64Shr());
-    use->ReplaceInput(1, graph()->NewNode(common()->Int64Constant(shift)));
-    Revisit(use);
+  // ...and should be a power of two.
+  if (!base::bits::IsPowerOfTwo64(value)) return NoChange();
 
-    for (Node* subuse : use->uses()) {
-      // XXX: How to handle this properly?
-      if (subuse->opcode() == IrOpcode::kStateValues) continue;
+  Reduction mul = ReduceFloat52Mul(node->InputAt(0));
+  if (!mul.Changed()) return NoChange();
 
-      subuse->set_op(machine()->TruncateInt64ToInt32());
-      Revisit(subuse);
-    }
+  Type::RangeType* range = NodeProperties::GetType(node->InputAt(0))
+      ->GetRange();
+
+  // The result should fit into 32bit word
+  if ((static_cast<int64_t>(range->Max()) / value) > 0xFFFFFFFULL) {
+    return NoChange();
   }
 
-  return Change(node, machine()->Int64Mul(), node->InputAt(0)->InputAt(0),
-                node->InputAt(1)->InputAt(0));
+  int64_t shift = WhichPowerOf2_64(static_cast<int64_t>(m.right().Value()));
+
+  // Replace division with 64bit right shift
+  Node* out = graph()->NewNode(machine()->Word64Shr(),
+      mul.replacement(), graph()->NewNode(common()->Int64Constant(shift)));
+  Revisit(out);
+  return Replace(out);
+}
+
+
+Reduction BinaryOperatorReducer::ReduceTruncateFloat64ToInt32(Node* node) {
+  Reduction subst = ReduceFloat52Mul(node->InputAt(0));
+
+  // truncate(26bit x 26bit)
+  if (!subst.Changed() && machine()->Is64()) {
+    subst = ReduceFloat52Div(node->InputAt(0));
+  }
+
+  if (!subst.Changed()) return NoChange();
+
+  return Change(node, machine()->TruncateInt64ToInt32(), subst.replacement());
 }
 
 
@@ -125,16 +121,6 @@ Reduction BinaryOperatorReducer::Change(Node* node, Operator const* op,
   node->set_op(op);
   node->ReplaceInput(0, a);
   node->TrimInputCount(1);
-  return Changed(node);
-}
-
-
-Reduction BinaryOperatorReducer::Change(Node* node, Operator const* op, Node* a,
-                                        Node* b) {
-  node->set_op(op);
-  node->ReplaceInput(0, a);
-  node->ReplaceInput(1, b);
-  node->TrimInputCount(2);
   return Changed(node);
 }
 
