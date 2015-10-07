@@ -57,8 +57,9 @@ Reduction BinaryOperatorReducer::ReduceFloat52Mul(Node* node) {
     return NoChange();
   }
 
-  Node* out = graph()->NewNode(machine()->Int64Mul(),
-      node->InputAt(0)->InputAt(0), node->InputAt(1)->InputAt(0));
+  Node* out =
+      graph()->NewNode(machine()->Int64Mul(), node->InputAt(0)->InputAt(0),
+                       node->InputAt(1)->InputAt(0));
   Revisit(out);
   return Replace(out);
 }
@@ -84,8 +85,8 @@ Reduction BinaryOperatorReducer::ReduceFloat52Div(Node* node) {
   Reduction mul = ReduceFloat52Mul(node->InputAt(0));
   if (!mul.Changed()) return NoChange();
 
-  Type::RangeType* range = NodeProperties::GetType(node->InputAt(0))
-      ->GetRange();
+  Type::RangeType* range =
+      NodeProperties::GetType(node->InputAt(0))->GetRange();
 
   // The result should fit into 32bit word
   if ((static_cast<int64_t>(range->Max()) / value) > 0xFFFFFFFULL) {
@@ -95,8 +96,9 @@ Reduction BinaryOperatorReducer::ReduceFloat52Div(Node* node) {
   int64_t shift = WhichPowerOf2_64(static_cast<int64_t>(m.right().Value()));
 
   // Replace division with 64bit right shift
-  Node* out = graph()->NewNode(machine()->Word64Shr(),
-      mul.replacement(), graph()->NewNode(common()->Int64Constant(shift)));
+  Node* out =
+      graph()->NewNode(machine()->Word64Shr(), mul.replacement(),
+                       graph()->NewNode(common()->Int64Constant(shift)));
   Revisit(out);
   return Replace(out);
 }
