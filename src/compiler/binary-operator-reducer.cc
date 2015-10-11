@@ -67,6 +67,9 @@ Reduction BinaryOperatorReducer::ReduceFloat52Mul(Node* node) {
 
   Type* range_type =  Type::Range(range->Min(), range->Max(), graph()->zone());
 
+  // TODO(indutny): Is Type::Number() a proper thing here? It looks like
+  // every other place is using Type:Internal() for int64 values.
+  // Should we off-load range propagation to Typer?
   NodeProperties::SetType(mul, Type::Intersect(range_type, Type::Number(),
       graph()->zone()));
 
