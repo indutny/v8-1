@@ -261,6 +261,7 @@
   V(TruncateFloat64ToFloat32)   \
   V(TruncateFloat64ToInt32)     \
   V(TruncateInt64ToInt32)       \
+  V(TruncateInt64ToFloat64)     \
   V(Float32Add)                 \
   V(Float32Sub)                 \
   V(Float32Mul)                 \

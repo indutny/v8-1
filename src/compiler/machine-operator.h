@@ -194,6 +194,7 @@ class MachineOperatorBuilder final : public ZoneObject {
   const Operator* TruncateFloat64ToFloat32();
   const Operator* TruncateFloat64ToInt32(TruncationMode);
   const Operator* TruncateInt64ToInt32();
+  const Operator* TruncateInt64ToFloat64();
 
   // Floating point operators always operate with IEEE 754 round-to-nearest
   // (single-precision).

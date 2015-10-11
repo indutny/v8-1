@@ -12,6 +12,7 @@
 #include "src/compiler/node.h"
 #include "src/compiler/node-matchers.h"
 #include "src/compiler/node-properties.h"
+#include "src/types-inl.h"
 
 namespace v8 {
 namespace internal {
@@ -29,6 +30,10 @@ BinaryOperatorReducer::BinaryOperatorReducer(Editor* editor, Graph* graph,
 
 Reduction BinaryOperatorReducer::Reduce(Node* node) {
   switch (node->opcode()) {
+    case IrOpcode::kFloat64Mul:
+      return ReduceFloat52Mul(node);
+    case IrOpcode::kFloat64Div:
+      return ReduceFloat52Div(node);
     case IrOpcode::kTruncateFloat64ToInt32:
       return ReduceTruncateFloat64ToInt32(node);
     default:
@@ -39,17 +44,15 @@ Reduction BinaryOperatorReducer::Reduce(Node* node) {
 
 
 Reduction BinaryOperatorReducer::ReduceFloat52Mul(Node* node) {
-  if (!machine()->Is64() || node->opcode() != IrOpcode::kFloat64Mul) {
-    return NoChange();
-  }
+  if (!machine()->Is64()) return NoChange();
 
-  // TODO(indutny): Observe ranges and cast things to int
   if (node->InputAt(0)->opcode() != IrOpcode::kChangeInt32ToFloat64 ||
       node->InputAt(1)->opcode() != IrOpcode::kChangeInt32ToFloat64) {
     return NoChange();
   }
 
-  Type::RangeType* range = NodeProperties::GetType(node)->GetRange();
+  Type* type = NodeProperties::GetType(node);
+  Type::RangeType* range = type->GetRange();
 
   // JavaScript has 52 bit precision in multiplication
   if (range == nullptr || range->Min() < 0.0 ||
@@ -57,16 +60,25 @@ Reduction BinaryOperatorReducer::ReduceFloat52Mul(Node* node) {
     return NoChange();
   }
 
-  Node* out =
+  Node* mul =
       graph()->NewNode(machine()->Int64Mul(), node->InputAt(0)->InputAt(0),
                        node->InputAt(1)->InputAt(0));
+  Revisit(mul);
+
+  Type* range_type =  Type::Range(range->Min(), range->Max(), graph()->zone());
+
+  NodeProperties::SetType(mul, Type::Intersect(range_type, Type::Number(),
+      graph()->zone()));
+
+  Node* out = graph()->NewNode(machine()->TruncateInt64ToFloat64(), mul);
   Revisit(out);
   return Replace(out);
 }
 
 
 Reduction BinaryOperatorReducer::ReduceFloat52Div(Node* node) {
-  if (!machine()->Is64() || node->opcode() != IrOpcode::kFloat64Div) {
+  if (!machine()->Is64()) return NoChange();
+  if (node->InputAt(0)->opcode() != IrOpcode::kTruncateInt64ToFloat64) {
     return NoChange();
   }
 
@@ -82,11 +94,8 @@ Reduction BinaryOperatorReducer::ReduceFloat52Div(Node* node) {
   // ...and should be a power of two.
   if (!base::bits::IsPowerOfTwo64(value)) return NoChange();
 
-  Reduction mul = ReduceFloat52Mul(node->InputAt(0));
-  if (!mul.Changed()) return NoChange();
-
-  Type::RangeType* range =
-      NodeProperties::GetType(node->InputAt(0))->GetRange();
+  Node* left = node->InputAt(0)->InputAt(0);
+  Type::RangeType* range = NodeProperties::GetType(left)->GetRange();
 
   // The result should fit into 32bit word
   if ((static_cast<int64_t>(range->Max()) / value) > 0xFFFFFFFULL) {
@@ -96,25 +105,22 @@ Reduction BinaryOperatorReducer::ReduceFloat52Div(Node* node) {
   int64_t shift = WhichPowerOf2_64(static_cast<int64_t>(m.right().Value()));
 
   // Replace division with 64bit right shift
-  Node* out =
-      graph()->NewNode(machine()->Word64Shr(), mul.replacement(),
+  Node* shr =
+      graph()->NewNode(machine()->Word64Shr(), left,
                        graph()->NewNode(common()->Int64Constant(shift)));
+  Revisit(shr);
+
+  Node* out = graph()->NewNode(machine()->TruncateInt64ToFloat64(), shr);
   Revisit(out);
   return Replace(out);
 }
 
 
 Reduction BinaryOperatorReducer::ReduceTruncateFloat64ToInt32(Node* node) {
-  Reduction subst = ReduceFloat52Mul(node->InputAt(0));
+  Node* input = node->InputAt(0);
+  if (input->opcode() != IrOpcode::kTruncateInt64ToFloat64) return NoChange();
 
-  // truncate(26bit x 26bit)
-  if (!subst.Changed() && machine()->Is64()) {
-    subst = ReduceFloat52Div(node->InputAt(0));
-  }
-
-  if (!subst.Changed()) return NoChange();
-
-  return Change(node, machine()->TruncateInt64ToInt32(), subst.replacement());
+  return Replace(input->InputAt(0));
 }
 
 

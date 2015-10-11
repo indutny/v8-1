@@ -928,6 +928,13 @@ void CodeGenerator::AssembleArchInstruction(Instruction* instr) {
       }
       __ cvtqsi2sd(i.OutputDoubleRegister(), kScratchRegister);
       break;
+    case kSSEInt64ToFloat64:
+      if (instr->InputAt(0)->IsRegister()) {
+        __ cvtqsi2sd(i.OutputDoubleRegister(), i.InputRegister(0));
+      } else {
+        __ cvtqsi2sd(i.OutputDoubleRegister(), i.InputOperand(0));
+      }
+      break;
     case kSSEFloat64ExtractLowWord32:
       if (instr->InputAt(0)->IsDoubleStackSlot()) {
         __ movl(i.OutputRegister(), i.InputOperand(0));

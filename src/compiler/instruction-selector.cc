@@ -699,6 +699,8 @@ void InstructionSelector::VisitNode(Node* node) {
       return MarkAsWord32(node), VisitTruncateFloat64ToInt32(node);
     case IrOpcode::kTruncateInt64ToInt32:
       return MarkAsWord32(node), VisitTruncateInt64ToInt32(node);
+    case IrOpcode::kTruncateInt64ToFloat64:
+      return MarkAsFloat64(node), VisitTruncateInt64ToFloat64(node);
     case IrOpcode::kFloat32Add:
       return MarkAsFloat32(node), VisitFloat32Add(node);
     case IrOpcode::kFloat32Sub:
