@@ -46,8 +46,10 @@ Reduction BinaryOperatorReducer::Reduce(Node* node) {
 Reduction BinaryOperatorReducer::ReduceFloat52Mul(Node* node) {
   if (!machine()->Is64()) return NoChange();
 
-  if (node->InputAt(0)->opcode() != IrOpcode::kChangeInt32ToFloat64 ||
-      node->InputAt(1)->opcode() != IrOpcode::kChangeInt32ToFloat64) {
+  Node* left = node->InputAt(0);
+  Node* right = node->InputAt(1);
+  if (left->opcode() != IrOpcode::kChangeInt32ToFloat64 ||
+      right->opcode() != IrOpcode::kChangeInt32ToFloat64) {
     return NoChange();
   }
 
@@ -60,9 +62,8 @@ Reduction BinaryOperatorReducer::ReduceFloat52Mul(Node* node) {
     return NoChange();
   }
 
-  Node* mul =
-      graph()->NewNode(machine()->Int64Mul(), node->InputAt(0)->InputAt(0),
-                       node->InputAt(1)->InputAt(0));
+  Node* mul = graph()->NewNode(machine()->Int64Mul(), left->InputAt(0),
+                               right->InputAt(0));
   Revisit(mul);
 
   Type* range_type = Type::Range(range->Min(), range->Max(), graph()->zone());
@@ -119,9 +120,15 @@ Reduction BinaryOperatorReducer::ReduceFloat52Div(Node* node) {
 
 Reduction BinaryOperatorReducer::ReduceTruncateFloat64ToInt32(Node* node) {
   Node* input = node->InputAt(0);
-  if (input->opcode() != IrOpcode::kTruncateInt64ToFloat64) return NoChange();
+  if (input->opcode() == IrOpcode::kTruncateInt64ToFloat64) {
+    return Replace(input->InputAt(0));
+  }
 
-  return Replace(input->InputAt(0));
+  if (input->opcode() == IrOpcode::kFloat64Div) {
+    return ReduceFloat52Div(input);
+  }
+
+  return NoChange();
 }
 
 
