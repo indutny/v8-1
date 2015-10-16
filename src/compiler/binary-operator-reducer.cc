@@ -74,7 +74,6 @@ Reduction BinaryOperatorReducer::ReduceFloat52Mul(Node* node) {
       mul, Type::Intersect(range_type, Type::Number(), graph()->zone()));
 
   Node* out = graph()->NewNode(machine()->TruncateInt64ToFloat64(), mul);
-  Revisit(out);
   return Replace(out);
 }
 
@@ -114,7 +113,6 @@ Reduction BinaryOperatorReducer::ReduceFloat52Div(Node* node) {
   Revisit(shr);
 
   Node* out = graph()->NewNode(machine()->TruncateInt64ToFloat64(), shr);
-  Revisit(out);
   return Replace(out);
 }
 
