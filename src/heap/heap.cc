@@ -1889,55 +1889,9 @@ Address Heap::DoScavenge(ObjectVisitor* scavenge_visitor,
         // for pointers to from semispace instead of looking for pointers
         // to new space.
         DCHECK(!target->IsMap());
-        Address obj_address = target->address();
 
-        // We are not collecting slots on new space objects during mutation
-        // thus we have to scan for pointers to evacuation candidates when we
-        // promote objects. But we should not record any slots in non-black
-        // objects. Grey object's slots would be rescanned.
-        // White object might not survive until the end of collection
-        // it would be a violation of the invariant to record it's slots.
-        bool record_slots = false;
-        if (incremental_marking()->IsCompacting()) {
-          MarkBit mark_bit = Marking::MarkBitFrom(target);
-          record_slots = Marking::IsBlack(mark_bit);
-        }
-
-        // Do not scavenge JSArrayBuffer's contents
-        if (target->IsJSArrayBuffer()) {
-          IterateAndMarkPointersToFromSpace(
-              target, obj_address,
-              obj_address + JSArrayBuffer::kByteLengthOffset + kPointerSize,
-              record_slots, &Scavenger::ScavengeObject);
-          IterateAndMarkPointersToFromSpace(
-              target, obj_address + JSArrayBuffer::kSize, obj_address + size,
-              record_slots, &Scavenger::ScavengeObject);
-          continue;
-        }
-
-#if V8_DOUBLE_FIELDS_UNBOXING
-        LayoutDescriptorHelper helper(target->map());
-        bool has_only_tagged_fields = helper.all_fields_tagged();
-
-        if (!has_only_tagged_fields) {
-          for (int offset = 0; offset < size;) {
-            int end_of_region_offset;
-            if (helper.IsTagged(offset, size, &end_of_region_offset)) {
-              IterateAndMarkPointersToFromSpace(
-                  target, obj_address + offset,
-                  obj_address + end_of_region_offset, record_slots,
-                  &Scavenger::ScavengeObject);
-            }
-            offset = end_of_region_offset;
-          }
-        } else {
-#endif
-          IterateAndMarkPointersToFromSpace(target, obj_address,
-                                            obj_address + size, record_slots,
-                                            &Scavenger::ScavengeObject);
-#if V8_DOUBLE_FIELDS_UNBOXING
-        }
-#endif
+        store_buffer()->IteratePointersToFromSpace(target, size,
+                                                   &Scavenger::ScavengeObject);
       }
     }
 
@@ -4449,40 +4403,6 @@ void Heap::ZapFromSpace() {
          cursor < limit; cursor += kPointerSize) {
       Memory::Address_at(cursor) = kFromSpaceZapValue;
     }
-  }
-}
-
-
-void Heap::IterateAndMarkPointersToFromSpace(HeapObject* object, Address start,
-                                             Address end, bool record_slots,
-                                             ObjectSlotCallback callback) {
-  Address slot_address = start;
-
-  while (slot_address < end) {
-    Object** slot = reinterpret_cast<Object**>(slot_address);
-    Object* target = *slot;
-    // If the store buffer becomes overfull we mark pages as being exempt from
-    // the store buffer.  These pages are scanned to find pointers that point
-    // to the new space.  In that case we may hit newly promoted objects and
-    // fix the pointers before the promotion queue gets to them.  Thus the 'if'.
-    if (target->IsHeapObject()) {
-      if (Heap::InFromSpace(target)) {
-        callback(reinterpret_cast<HeapObject**>(slot),
-                 HeapObject::cast(target));
-        Object* new_target = *slot;
-        if (InNewSpace(new_target)) {
-          SLOW_DCHECK(Heap::InToSpace(new_target));
-          SLOW_DCHECK(new_target->IsHeapObject());
-          store_buffer_.EnterDirectlyIntoStoreBuffer(
-              reinterpret_cast<Address>(slot));
-        }
-        SLOW_DCHECK(!MarkCompactCollector::IsOnEvacuationCandidate(new_target));
-      } else if (record_slots &&
-                 MarkCompactCollector::IsOnEvacuationCandidate(target)) {
-        mark_compact_collector()->RecordSlot(object, slot, target);
-      }
-    }
-    slot_address += kPointerSize;
   }
 }
 
