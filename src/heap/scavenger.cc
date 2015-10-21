@@ -310,7 +310,7 @@ class ScavengingVisitor : public StaticVisitorBase {
 
   static inline void EvacuateJSArrayBuffer(Map* map, HeapObject** slot,
                                            HeapObject* object) {
-    ObjectEvacuationStrategy<POINTER_OBJECT>::Visit(map, slot, object);
+    ObjectEvacuationStrategy<DATA_OBJECT>::Visit(map, slot, object);
 
     Heap* heap = map->GetHeap();
     MapWord map_word = object->map_word();
