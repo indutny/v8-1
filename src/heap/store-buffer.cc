@@ -8,7 +8,6 @@
 
 #include "src/counters.h"
 #include "src/heap/incremental-marking.h"
-#include "src/heap/mark-compact-inl.h"
 #include "src/heap/store-buffer-inl.h"
 #include "src/isolate.h"
 #include "src/objects-inl.h"
@@ -541,107 +540,6 @@ void StoreBuffer::IteratePointersToNewSpace(ObjectSlotCallback slot_callback) {
     }
     if (callback_ != NULL) {
       (*callback_)(heap_, NULL, kStoreBufferScanningPageEvent);
-    }
-  }
-}
-
-
-void StoreBuffer::IterateAndMarkPointersToFromSpace(
-    HeapObject* object, Address start, Address end, bool record_slots,
-    ObjectSlotCallback slot_callback) {
-  Address slot_address = start;
-
-  while (slot_address < end) {
-    Object** slot = reinterpret_cast<Object**>(slot_address);
-    Object* target = *slot;
-    // If the store buffer becomes overfull we mark pages as being exempt from
-    // the store buffer.  These pages are scanned to find pointers that point
-    // to the new space.  In that case we may hit newly promoted objects and
-    // fix the pointers before the promotion queue gets to them.  Thus the 'if'.
-    if (target->IsHeapObject()) {
-      if (heap_->InFromSpace(target)) {
-        slot_callback(reinterpret_cast<HeapObject**>(slot),
-                      HeapObject::cast(target));
-        Object* new_target = *slot;
-        if (heap_->InNewSpace(new_target)) {
-          SLOW_DCHECK(heap_->InToSpace(new_target));
-          SLOW_DCHECK(new_target->IsHeapObject());
-          EnterDirectlyIntoStoreBuffer(reinterpret_cast<Address>(slot));
-        }
-        SLOW_DCHECK(!MarkCompactCollector::IsOnEvacuationCandidate(new_target));
-      } else if (record_slots &&
-                 MarkCompactCollector::IsOnEvacuationCandidate(target)) {
-        heap_->mark_compact_collector()->RecordSlot(object, slot, target);
-      }
-    }
-    slot_address += kPointerSize;
-  }
-}
-
-
-void StoreBuffer::IteratePointersToFromSpace(HeapObject* target, int size,
-                                             ObjectSlotCallback slot_callback) {
-  Address obj_address = target->address();
-
-  // We are not collecting slots on new space objects during mutation
-  // thus we have to scan for pointers to evacuation candidates when we
-  // promote objects. But we should not record any slots in non-black
-  // objects. Grey object's slots would be rescanned.
-  // White object might not survive until the end of collection
-  // it would be a violation of the invariant to record it's slots.
-  bool record_slots = false;
-  if (heap_->incremental_marking()->IsCompacting()) {
-    MarkBit mark_bit = Marking::MarkBitFrom(target);
-    record_slots = Marking::IsBlack(mark_bit);
-  }
-
-  // Do not scavenge JSArrayBuffer's contents
-  switch (target->ContentType()) {
-    case HeapObjectContents::kTaggedValues: {
-      IterateAndMarkPointersToFromSpace(target, obj_address, obj_address + size,
-                                        record_slots, slot_callback);
-      break;
-    }
-    case HeapObjectContents::kMixedValues: {
-      if (target->IsFixedTypedArrayBase()) {
-        IterateAndMarkPointersToFromSpace(
-            target, obj_address + FixedTypedArrayBase::kBasePointerOffset,
-            obj_address + FixedTypedArrayBase::kHeaderSize, record_slots,
-            slot_callback);
-      } else if (target->IsBytecodeArray()) {
-        IterateAndMarkPointersToFromSpace(
-            target, obj_address + BytecodeArray::kConstantPoolOffset,
-            obj_address + BytecodeArray::kHeaderSize, record_slots,
-            slot_callback);
-      } else if (target->IsJSArrayBuffer()) {
-        IterateAndMarkPointersToFromSpace(
-            target, obj_address,
-            obj_address + JSArrayBuffer::kByteLengthOffset + kPointerSize,
-            record_slots, slot_callback);
-        IterateAndMarkPointersToFromSpace(
-            target, obj_address + JSArrayBuffer::kSize, obj_address + size,
-            record_slots, slot_callback);
-#if V8_DOUBLE_FIELDS_UNBOXING
-      } else if (FLAG_unbox_double_fields) {
-        LayoutDescriptorHelper helper(target->map());
-        DCHECK(!helper.all_fields_tagged());
-
-        for (int offset = 0; offset < size;) {
-          int end_of_region_offset;
-          if (helper.IsTagged(offset, size, &end_of_region_offset)) {
-            IterateAndMarkPointersToFromSpace(
-                target, obj_address + offset,
-                obj_address + end_of_region_offset, record_slots,
-                slot_callback);
-          }
-          offset = end_of_region_offset;
-        }
-#endif
-      }
-      break;
-    }
-    case HeapObjectContents::kRawValues: {
-      break;
     }
   }
 }

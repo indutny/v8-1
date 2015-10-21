@@ -61,11 +61,6 @@ class StoreBuffer {
   // surviving old-to-new pointers into the store buffer to rebuild it.
   void IteratePointersToNewSpace(ObjectSlotCallback callback);
 
-  // Iterate pointers to from semispace of new space found in memory interval
-  // from start to end within |object|.
-  void IteratePointersToFromSpace(HeapObject* target, int size,
-                                  ObjectSlotCallback slot_callback);
-
   static const int kStoreBufferOverflowBit = 1 << (14 + kPointerSizeLog2);
   static const int kStoreBufferSize = kStoreBufferOverflowBit;
   static const int kStoreBufferLength = kStoreBufferSize / sizeof(Address);
@@ -162,10 +157,6 @@ class StoreBuffer {
                              ObjectSlotCallback slot_callback);
 
   void IteratePointersInStoreBuffer(ObjectSlotCallback slot_callback);
-
-  void IterateAndMarkPointersToFromSpace(HeapObject* object, Address start,
-                                         Address end, bool record_slots,
-                                         ObjectSlotCallback slot_callback);
 
 #ifdef VERIFY_HEAP
   void VerifyPointers(LargeObjectSpace* space);
