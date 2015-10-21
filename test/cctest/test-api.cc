@@ -14208,11 +14208,12 @@ THREADED_TEST(SkipArrayBufferDuringScavenge) {
   // Create ArrayBuffer with pointer-that-cannot-be-visited in the backing store
   Local<v8::ArrayBuffer> ab = v8::ArrayBuffer::New(isolate, store_ptr, 8);
 
-  // Should not crash
+  // Should not crash,
+  // i.e. backing store pointer should not be treated as a heap object pointer
   CcTest::heap()->CollectGarbage(i::NEW_SPACE);  // in survivor space now
   CcTest::heap()->CollectGarbage(i::NEW_SPACE);  // in old gen now
 
-  // Just use the `ab` to silence compiler warning
+  // Use `ab` to silence compiler warning
   CHECK_EQ(ab->GetContents().Data(), store_ptr);
 }
 
