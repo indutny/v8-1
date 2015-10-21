@@ -1902,19 +1902,6 @@ Address Heap::DoScavenge(ObjectVisitor* scavenge_visitor,
           MarkBit mark_bit = Marking::MarkBitFrom(target);
           record_slots = Marking::IsBlack(mark_bit);
         }
-
-        // Do not scavenge JSArrayBuffer's contents
-        if (target->IsJSArrayBuffer()) {
-          IterateAndMarkPointersToFromSpace(
-              target, obj_address,
-              obj_address + JSArrayBuffer::kByteLengthOffset + kPointerSize,
-              record_slots, &Scavenger::ScavengeObject);
-          IterateAndMarkPointersToFromSpace(
-              target, obj_address + JSArrayBuffer::kSize, obj_address + size,
-              record_slots, &Scavenger::ScavengeObject);
-          continue;
-        }
-
 #if V8_DOUBLE_FIELDS_UNBOXING
         LayoutDescriptorHelper helper(target->map());
         bool has_only_tagged_fields = helper.all_fields_tagged();
